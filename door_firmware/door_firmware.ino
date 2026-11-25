@@ -290,4 +290,13 @@ void loop() {
     if (!rpiAllowDoorOpen) {
       Serial.println("[상태] 추가 판단 조건 미충족으로 문을 열지 않습니다.");
     // } else if (!safeDistanceForOpen) {
-    //   Ser
+    //   Serial.println("[판단] OPEN 명령 수신했으나 초음파 조건(50cm 이상) 미충족으로 대기합니다.");
+    } else if (door == 0) {
+      openDoor();
+    }
+  }
+
+  // 5단계: 0.1초 주기 문 상태 송신 (라즈베리파이 연동 시 필요에 따라 활용)
+  // sendDoorStateIfDue();
+  // delay(100);
+}
