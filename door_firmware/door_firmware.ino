@@ -32,7 +32,6 @@ enum MoveResult {
 // 문 및 라즈베리파이 명령 상태 변수
 int door = 0;                          // 0: 닫힘, 1: 열림
 int alertLevel = 0;                    // 0: 없음, 1: ALERT 1(LED), 2: ALERT 2(LED + 부저)
-bool rpiAllowDoorOpen = true;          // 추가 상태 판단 플래그 (초기값 true)
 String lastDoorCommand = "NONE";       // 최근 문 제어 명령 ("OPEN", "CLOSE", "HOLD", "NONE")
 
 bool holdActive = false;               // HOLD 타이머 활성 여부
@@ -40,6 +39,7 @@ unsigned long holdDurationMs = DEFAULT_HOLD_MS;
 unsigned long holdUntilMs = 0;         // HOLD 만료 시각 (millis 기준)
 unsigned long lastStateReportMs = 0;   // 0.1초(100ms) 주기 STATE 송신 타이머
 unsigned long lastDistanceMs = 0;      // 초음파 100ms 주기 측정 타이머
+long distance = 100;                   // 초음파 거리 (문이 열리지 않는 거리로 초기화)
 
 String rxLine = "";                    // 시리얼 수신 버퍼
 
@@ -62,7 +62,7 @@ bool isTcrtObstacleDetected() {
 }
 
 // 초음파 거리(cm) 측정 함수
-long measureDistanceCm() {
+long measureDistanceCm(long dist) {
   digitalWrite(hcTrigPin, LOW);
   delayMicroseconds(2);
   digitalWrite(hcTrigPin, HIGH);
@@ -71,7 +71,8 @@ long measureDistanceCm() {
 
   long duration = pulseIn(hcEchoPin, HIGH, 50000);
   if (duration == 0) {
-    return -1; // 측정 실패 또는 범위 초과
+    Serial.println("[초음파] 측정 실패!");
+    return dist; // 측정 실패 또는 범위 초과 -> 기존값 반환
   }
   return duration * 17 / 1000;
 }
@@ -146,7 +147,7 @@ void openDoor() {
   }
 }
 
-void closeDoorWithAntiPinch() {
+void closeDoor() {
   if (door == 0 && myservo.read() <= DOOR_CLOSE_ANGLE + 2) {
     door = 0;
     return;
@@ -263,34 +264,28 @@ void loop() {
   // 2단계: 초음파 센서로 일정 거리 유지 확인 (100ms 주기로 측정)
   if (millis() - lastDistanceMs >= 100) {
     lastDistanceMs = millis();
-    long distance = measureDistanceCm();
+    distance = measureDistanceCm(distance);
     Serial.print("[초음파] 거리: ");
     Serial.print(distance);
     Serial.println(" cm");
   }
-
-  // bool safeDistanceForOpen = (distance >= SAFE_OPEN_DISTANCE_CM);
-  // if (distance >= 0 && distance < SAFE_OPEN_DISTANCE_CM) {
-  //   Serial.println("[초음파] 50cm 이내 감지 -> 충돌 방지를 위해 문을 열지 않습니다.");
-  // }
+  bool safeDistanceForOpen = (distance >= SAFE_OPEN_DISTANCE_CM);
 
   // 3단계: HOLD 타이머 만료 시 새 명령이 없으면 보드가 스스로 닫기
   if (holdActive && door == 1 && (long)(millis() - holdUntilMs) >= 0) {
     holdActive = false;
     lastDoorCommand = "CLOSE";
-    closeDoorWithAntiPinch();
+    closeDoor();
   }
 
   // 4단계: 라즈베리파이 명령 + 초음파 거리 + 추가 상태 플래그를 종합해 문 제어
   if (lastDoorCommand == "CLOSE") {
     if (!holdActive && door == 1) {
-      closeDoorWithAntiPinch();
+      closeDoor();
     }
   } else if (lastDoorCommand == "OPEN") {
-    if (!rpiAllowDoorOpen) {
-      Serial.println("[상태] 추가 판단 조건 미충족으로 문을 열지 않습니다.");
-    // } else if (!safeDistanceForOpen) {
-    //   Serial.println("[판단] OPEN 명령 수신했으나 초음파 조건(50cm 이상) 미충족으로 대기합니다.");
+    if (!safeDistanceForOpen) {
+      Serial.println("[판단] OPEN 명령 수신했으나 초음파 조건(50cm 이상) 미충족으로 대기합니다.");
     } else if (door == 0) {
       openDoor();
     }
