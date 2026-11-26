@@ -1,20 +1,19 @@
 #include <Arduino.h>
-#include <Servo.h>
+#include <ESP32Servo.h>
 
 // ==========================================
-// [ESP32 복귀 시 변경 포인트 요약]
-// 1. #include <Servo.h> -> #include <ESP32Servo.h>, 하드웨어 Serial2로 LD2450 연결 복귀
-// 2. 핀 번호를 ESP32 GPIO 핀맵으로 재설정 및 LED/부저 핀 추가
-// 3. 라즈베리파이 시리얼 포트 확인 및 STATE 송신 활성화
+// TODO:
+// 1. LD2450 레이더센서 감지 및 웹캠 트리거 기능 추가
+// 2. LED/부저 알람 기능 추가
 // ==========================================
 
 Servo myservo;
 
 // 아두이노 우노 핀 배치
-const int tcrtDoPin = 4;               // TCRT5000 모듈 디지털 출력(DO) 핀
-const int hcTrigPin = 6;               // 초음파 Trig
-const int hcEchoPin = 7;               // 초음파 Echo
-const int servoPin = 9;                // 서보모터 PWM 핀
+const int tcrtDoPin = 4;              // TCRT5000 모듈 디지털 출력(DO) 핀
+const int hcTrigPin = 23;             // 초음파 Trig
+const int hcEchoPin = 19;             // 초음파 Echo
+const int servoPin = 18;              // 서보모터 PWM 핀
 
 // TCRT5000 모듈 출력 기준 (일반적인 LM393 비교기 모듈은 감지 시 LOW 출력)
 const int OBSTACLE_DETECTED_STATE = LOW;
@@ -69,7 +68,8 @@ long measureDistanceCm(long dist) {
   delayMicroseconds(10);
   digitalWrite(hcTrigPin, LOW);
 
-  long duration = pulseIn(hcEchoPin, HIGH, 50000);
+  // ESP32 pulseIn() 반환 타입에 맞춰 unsigned long 사용
+  unsigned long duration = pulseIn(hcEchoPin, HIGH, 50000);
   if (duration == 0) {
     Serial.println("[초음파] 측정 실패!");
     return dist; // 측정 실패 또는 범위 초과 -> 기존값 반환
@@ -78,7 +78,6 @@ long measureDistanceCm(long dist) {
 }
 
 // 서보 이동 함수 (+ 장애물 감시)
-// 반환값 true: 장애물 감지됨 / false: 정상 완료
 // checkObstacle: true일 때만 이동 중 장애물 확인 (false: 역동작 중)
 MoveResult moveServoWithObstacleCheck(int targetAngle, int stepDelayMs, bool checkObstacle) {
   int currentAngle = myservo.read();                    // 현재 서보 각도 
@@ -245,18 +244,23 @@ void sendDoorStateIfDue() {
 
 void setup() {
   Serial.begin(115200);
-  myservo.attach(servoPin, 500, 2400);
+  rxLine.reserve(66);     // String 반복 할당으로 인한 힙 메모리 파편화 방지
+
+  // ESP32 하드웨어 PWM(LEDC) 타이머 할당 및 서보 주파수 설정
+  ESP32PWM::allocateTimer(0);
+  myservo.setPeriodHertz(50);           // SG90 서보 표준 PWM 주파수 50Hz (주기 20ms)
+  myservo.attach(servoPin, 500, 2400);  // 최소 500us ~ 최대 2400us 펄스 폭
   myservo.write(DOOR_CLOSE_ANGLE);
 
   pinMode(hcTrigPin, OUTPUT);
   pinMode(hcEchoPin, INPUT);
   pinMode(tcrtDoPin, INPUT_PULLUP);
 
-  Serial.println("Arduino Uno HandsFreeDoor 테스트 시작");
+  Serial.println("ESP32 HandsFreeDoor 테스트 시작");
 }
 
 void loop() {
-  // 1. 시리얼 명령 수신
+  // 시리얼 명령 수신
   pollSerialCommands();
 
   // [추후 확장] 1단계: 레이더 센서 사람 감지 -> 웹캠 활성화 트리거 자리
@@ -291,7 +295,6 @@ void loop() {
     }
   }
 
-  // 5단계: 0.1초 주기 문 상태 송신 (라즈베리파이 연동 시 필요에 따라 활용)
+  // 5단계: 0.1초 주기 문 상태 송신
   // sendDoorStateIfDue();
-  // delay(100);
 }
