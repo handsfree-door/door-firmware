@@ -142,6 +142,7 @@ void openDoor() {
     // 문이 열리는 도중 HOLD가 미리 들어온 경우, 완전히 열린 시점부터 대기 시간 시작
     if (holdActive) {
       holdUntilMs = millis() + holdDurationMs;
+      lastDoorCommand = "HOLD";
     }
   }
 }
@@ -178,21 +179,26 @@ void handleCommand(String cmd) {
   if (cmd == "OPEN") {
     lastDoorCommand = "OPEN";
     holdActive = false;
-  } else if (cmd.startsWith("HOLD")) {
-    // OPEN 이후 열린 상태를 유지(대기)하는 역할
-    lastDoorCommand = "HOLD";
-    holdDurationMs = DEFAULT_HOLD_MS;
-
-    int spaceIdx = cmd.indexOf(' ');
-    if (spaceIdx != -1) {
-      // "HOLD 2000"으로 명령을 받았을 때 "2000"을 대기시간으로 설정 / "HOLD"만 올 경우 기본값 사용
-      long parsedMs = cmd.substring(spaceIdx + 1).toInt();
-      if (parsedMs > 0) {
-        holdDurationMs = (unsigned long)parsedMs;
-      }
+  } else if (cmd.startsWith("HOLD")) {  // OPEN 이후 열린 상태를 유지(대기)하는 역할
+    // 문이 이미 열려 있을 때(door == 1)만 HOLD 상태로 전환
+    if (door == 1) {
+      lastDoorCommand = "HOLD";
     }
-    holdActive = true;
-    holdUntilMs = millis() + holdDurationMs;
+
+    if (door == 1 || lastDoorCommand == "OPEN") {
+      holdDurationMs = DEFAULT_HOLD_MS;
+
+      int spaceIdx = cmd.indexOf(' ');
+      if (spaceIdx != -1) {
+        // "HOLD 2000"으로 명령을 받았을 때 "2000"을 대기시간으로 설정 / "HOLD"만 올 경우 기본값 사용
+        long parsedMs = cmd.substring(spaceIdx + 1).toInt();
+        if (parsedMs > 0) {
+          holdDurationMs = (unsigned long)parsedMs;
+        }
+      }
+      holdActive = true;
+      holdUntilMs = millis() + holdDurationMs;
+    }
   } else if (cmd == "CLOSE") {
     lastDoorCommand = "CLOSE";
     holdActive = false;
@@ -219,6 +225,7 @@ void pollSerialCommands() {
 
       handleCommand(rxLine);
       rxLine = "";
+      return; // 명령 1줄 처리 후 loop() 판단 단계를 먼저 거치도록 반환
     } else if (c != '\r') {
       if (rxLine.length() < 64) { // 우노 SRAM 보호용 길이 제한 (64bit 이상일 때 비우기)
         rxLine += c;
@@ -232,7 +239,7 @@ void pollSerialCommands() {
 // 문 상태 송신 
 void sendDoorStateIfDue() {
   unsigned long now = millis();
-  if (now - lastStateReportMs >= 100) { // 0.1초마다 한 줄씩 송신
+  if (now - lastStateReportMs >= 200) { // 0.2초마다 한 줄씩 송신
     lastStateReportMs = now;
     int reed = (door == 0) ? 1 : 0;
     Serial.print("STATE angle=");
@@ -269,9 +276,9 @@ void loop() {
   if (millis() - lastDistanceMs >= 100) {
     lastDistanceMs = millis();
     distance = measureDistanceCm(distance);
-    Serial.print("[초음파] 거리: ");
-    Serial.print(distance);
-    Serial.println(" cm");
+    // Serial.print("[초음파] 거리: ");
+    // Serial.print(distance);
+    // Serial.println(" cm");
   }
   bool safeDistanceForOpen = (distance >= SAFE_OPEN_DISTANCE_CM);
 
@@ -296,5 +303,5 @@ void loop() {
   }
 
   // 5단계: 0.1초 주기 문 상태 송신
-  // sendDoorStateIfDue();
+  sendDoorStateIfDue();
 }
